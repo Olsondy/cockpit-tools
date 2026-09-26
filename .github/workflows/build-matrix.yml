@@ -198,6 +198,11 @@ jobs:
       - name: 🔄 Sync versions
         run: npm run sync-version
 
+      - name: 🧪 Test Claude CLI credential sync
+        if: matrix.label == 'macos-x86_64'
+        working-directory: src-tauri
+        run: cargo test cli_sync --lib
+
       - name: 🧪 Test core Rust library
         if: matrix.label == 'ubuntu-22.04'
         run: npm run test:rust:core
