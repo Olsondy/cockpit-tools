@@ -364,6 +364,60 @@ fn desktop_login_component_cleanup_removes_only_owned_cache_dirs() {
     }
 
     #[test]
+    fn cli_sync_propagates_refreshed_account_tokens_to_stale_instance() {
+        let account = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "new-access",
+                "refreshToken": "new-refresh",
+                "expiresAt": 2000
+            }
+        });
+        let stale_instance = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "old-access",
+                "refreshToken": "old-refresh",
+                "expiresAt": 1000
+            },
+            "otherCredential": "keep"
+        });
+        let merged = merge_newer_account_oauth_credentials(&account, &stale_instance)
+            .expect("newer account tokens should update the bound instance");
+        assert_eq!(merged["claudeAiOauth"], account["claudeAiOauth"]);
+        assert_eq!(merged["otherCredential"], "keep");
+        assert!(merge_newer_account_oauth_credentials(&account, &merged).is_none());
+        assert!(merge_newer_account_oauth_credentials(&account, &serde_json::json!({})).is_some());
+    }
+
+    #[test]
+    fn cli_sync_does_not_overwrite_newer_instance_tokens() {
+        let account = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "old-access",
+                "refreshToken": "old-refresh",
+                "expiresAt": 1000
+            }
+        });
+        let newer_instance = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "new-access",
+                "refreshToken": "new-refresh",
+                "expiresAt": 2000
+            }
+        });
+        assert!(merge_newer_account_oauth_credentials(&account, &newer_instance).is_none());
+
+        let same_expiry_different_token = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "another-access",
+                "refreshToken": "another-refresh",
+                "expiresAt": 1000
+            }
+        });
+        assert!(merge_newer_account_oauth_credentials(&account, &same_expiry_different_token)
+            .is_none());
+    }
+
+    #[test]
     fn rejects_desktop_oauth_json_import() {
         let error = parse_import_item(&serde_json::json!({
             "id": "claude_desktop_alice",

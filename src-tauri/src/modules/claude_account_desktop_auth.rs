@@ -626,6 +626,97 @@ fn should_sync_cli_oauth_credentials(account: Option<&Value>, instance: &Value) 
     }
 }
 
+fn should_inject_account_oauth_credentials(account: &Value, instance: &Value) -> bool {
+    let (Some(account_access_token), Some(account_refresh_token)) = (
+        credentials_access_token(account),
+        credentials_refresh_token(account),
+    ) else {
+        return false;
+    };
+    let Some(instance_access_token) = credentials_access_token(instance) else {
+        return true;
+    };
+    if account_access_token == instance_access_token
+        && Some(account_refresh_token) == credentials_refresh_token(instance)
+    {
+        return false;
+    }
+    match (
+        credentials_expires_at(account),
+        credentials_expires_at(instance),
+    ) {
+        (Some(account_expires_at), Some(instance_expires_at)) => {
+            account_expires_at > instance_expires_at
+        }
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+fn merge_newer_account_oauth_credentials(account: &Value, instance: &Value) -> Option<Value> {
+    if !should_inject_account_oauth_credentials(account, instance) {
+        return None;
+    }
+    let mut merged = if instance.is_object() {
+        instance.clone()
+    } else {
+        json!({})
+    };
+    merged["claudeAiOauth"] = account["claudeAiOauth"].clone();
+    Some(merged)
+}
+
+fn sync_account_oauth_to_bound_cli_instances(account: &ClaudeAccount) {
+    let Some(snapshot) = account.claude_credentials_raw.as_ref() else {
+        return;
+    };
+    let Ok(store) = crate::modules::claude_instance::load_instance_store() else {
+        logger::log_warn("[Claude CLI] 读取实例列表失败，无法同步已刷新的账号凭证");
+        return;
+    };
+    let mut config_dirs: Vec<PathBuf> = store
+        .instances
+        .iter()
+        .filter(|instance| {
+            instance.launch_mode == crate::models::InstanceLaunchMode::Cli
+                && instance.bind_account_id.as_deref() == Some(account.id.as_str())
+        })
+        .map(|instance| PathBuf::from(&instance.user_data_dir))
+        .collect();
+    if store.default_settings.launch_mode == crate::models::InstanceLaunchMode::Cli
+        && store.default_settings.bind_account_id.as_deref() == Some(account.id.as_str())
+    {
+        if let Ok(default_dir) = get_default_claude_code_config_dir() {
+            config_dirs.push(default_dir);
+        }
+    }
+
+    for config_dir in config_dirs {
+        if !config_dir.is_dir() {
+            continue;
+        }
+        let instance_credentials = read_claude_code_credentials(&config_dir);
+        let Some(next_credentials) =
+            merge_newer_account_oauth_credentials(snapshot, &instance_credentials)
+        else {
+            continue;
+        };
+        match write_claude_code_credentials(&config_dir, &next_credentials) {
+            Ok(()) => logger::log_info(&format!(
+                "[Claude CLI] 已同步刷新后的账号凭证到实例: account_id={}, config_dir={}",
+                account.id,
+                config_dir.display()
+            )),
+            Err(error) => logger::log_warn(&format!(
+                "[Claude CLI] 同步已刷新账号凭证到实例失败: account_id={}, config_dir={}, error={}",
+                account.id,
+                config_dir.display(),
+                error
+            )),
+        }
+    }
+}
+
 pub fn start_desktop_login(
     app: Option<AppHandle>,
     progress_id: Option<String>,
@@ -3652,7 +3743,9 @@ pub async fn refresh_account_quota(account_id: &str) -> Result<ClaudeAccount, St
             account.usage_updated_at = Some(now_ts_ms());
         }
     }
-    save_account_and_index(account)
+    let account = save_account_and_index(account)?;
+    sync_account_oauth_to_bound_cli_instances(&account);
+    Ok(account)
 }
 
 pub async fn refresh_all_quotas() -> Result<Vec<(String, Result<ClaudeAccount, String>)>, String> {
