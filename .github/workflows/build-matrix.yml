@@ -117,6 +117,33 @@ jobs:
       - name: 🧪 TypeScript regression tests
         run: npm test
 
+  test-claude-cli-credential-sync:
+    name: "🧪 Test Claude CLI credential sync"
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦀 Rust setup
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 🦀 Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          key: macos-claude-cli-sync
+
+      - name: 🐹 Go setup
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sidecars/cockpit-cliproxy/go.mod
+          cache-dependency-path: sidecars/cockpit-cliproxy/go.sum
+
+      - name: 🧪 Test Claude CLI credential sync
+        working-directory: src-tauri
+        run: cargo test cli_sync --lib
+
   build:
     name: "🏗️ Build: ${{ matrix.label }}"
     needs: [preflight-locales, preflight-typecheck, preflight-tests, preflight-ts-windows]
@@ -197,11 +224,6 @@ jobs:
 
       - name: 🔄 Sync versions
         run: npm run sync-version
-
-      - name: 🧪 Test Claude CLI credential sync
-        if: matrix.label == 'macos-x86_64'
-        working-directory: src-tauri
-        run: cargo test cli_sync --lib
 
       - name: 🧪 Test core Rust library
         if: matrix.label == 'ubuntu-22.04'
