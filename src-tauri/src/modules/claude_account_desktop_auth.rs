@@ -549,6 +549,15 @@ pub fn sync_cli_account_from_config_dir_if_same(
     if credentials_oauth(&credentials_raw).is_none() {
         return Ok(None);
     }
+    if !should_sync_cli_oauth_credentials(existing.claude_credentials_raw.as_ref(), &credentials_raw)
+    {
+        logger::log_warn(&format!(
+            "[Claude CLI] 跳过实例登录态同步：实例凭证为空或早于账号快照，bind_id={}, config_dir={}",
+            account_id,
+            config_dir.display()
+        ));
+        return Ok(None);
+    }
     let config_path = get_claude_code_global_config_path(config_dir)?;
     let Some(config_raw) = read_config_file(&config_path)? else {
         return Ok(None);
@@ -580,6 +589,41 @@ pub fn sync_cli_account_from_config_dir_if_same(
         config_dir.display()
     ));
     save_account_and_index(incoming).map(Some)
+}
+
+fn should_sync_cli_oauth_credentials(account: Option<&Value>, instance: &Value) -> bool {
+    let Some(instance_access_token) = credentials_access_token(instance) else {
+        return false;
+    };
+    let Some(account) = account else {
+        return true;
+    };
+    let account_refresh_token = credentials_refresh_token(account);
+    let instance_refresh_token = credentials_refresh_token(instance);
+    if account_refresh_token.is_some() && instance_refresh_token.is_none() {
+        return false;
+    }
+    let Some(account_access_token) = credentials_access_token(account) else {
+        return true;
+    };
+    let same_tokens = account_access_token == instance_access_token
+        && account_refresh_token == instance_refresh_token;
+
+    // A different token may be a CLI rotation, but an older instance can also
+    // contain a revoked token after Cockpit has reauthorized this account.
+    // Only replace the account snapshot when the instance has a later expiry.
+    match (
+        credentials_expires_at(account),
+        credentials_expires_at(instance),
+    ) {
+        (Some(account_expires_at), Some(instance_expires_at)) => {
+            instance_expires_at > account_expires_at
+                || (instance_expires_at == account_expires_at && same_tokens)
+        }
+        (None, Some(_)) => true,
+        (None, None) => same_tokens,
+        _ => false,
+    }
 }
 
 pub fn start_desktop_login(

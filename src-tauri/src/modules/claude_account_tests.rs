@@ -277,6 +277,93 @@ fn desktop_login_component_cleanup_removes_only_owned_cache_dirs() {
     }
 
     #[test]
+    fn cli_sync_keeps_newer_account_credentials_after_reauthorization() {
+        let account = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "new-access",
+                "refreshToken": "new-refresh",
+                "expiresAt": 2000
+            }
+        });
+        let stale_instance = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "old-access",
+                "refreshToken": "old-refresh",
+                "expiresAt": 1000
+            }
+        });
+        let cleared_instance = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "",
+                "refreshToken": "",
+                "expiresAt": 0
+            }
+        });
+        let missing_refresh = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "old-access",
+                "expiresAt": 3000
+            }
+        });
+        let same_expiry_instance = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "old-access",
+                "refreshToken": "old-refresh",
+                "expiresAt": 2000
+            }
+        });
+        let same_token_older_expiry = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "new-access",
+                "refreshToken": "new-refresh",
+                "expiresAt": 1000
+            }
+        });
+
+        assert!(!should_sync_cli_oauth_credentials(
+            Some(&account),
+            &stale_instance
+        ));
+        assert!(!should_sync_cli_oauth_credentials(
+            Some(&account),
+            &cleared_instance
+        ));
+        assert!(!should_sync_cli_oauth_credentials(
+            Some(&account),
+            &missing_refresh
+        ));
+        assert!(!should_sync_cli_oauth_credentials(
+            Some(&account),
+            &same_expiry_instance
+        ));
+        assert!(!should_sync_cli_oauth_credentials(
+            Some(&account),
+            &same_token_older_expiry
+        ));
+    }
+
+    #[test]
+    fn cli_sync_keeps_newer_instance_token_rotations() {
+        let account = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "old-access",
+                "refreshToken": "old-refresh",
+                "expiresAt": 1000
+            }
+        });
+        let rotated_instance = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "new-access",
+                "refreshToken": "new-refresh",
+                "expiresAt": 2000
+            }
+        });
+
+        assert!(should_sync_cli_oauth_credentials(Some(&account), &rotated_instance));
+        assert!(should_sync_cli_oauth_credentials(Some(&rotated_instance), &rotated_instance));
+    }
+
+    #[test]
     fn rejects_desktop_oauth_json_import() {
         let error = parse_import_item(&serde_json::json!({
             "id": "claude_desktop_alice",
